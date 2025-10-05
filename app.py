@@ -199,11 +199,9 @@ def home():
                 let html = `<h3>✅ ${data.coupon.length} matchs recommandés</h3>`;
 
                 data.coupon.forEach(bet => {
-                    const home = bet.match.split(' vs ')[0] || 'Équipe 1';
-                    const away = bet.match.split(' vs ')[1] || 'Équipe 2';
+                    const [home, away] = bet.match.split(' vs ');
                     const isHome = bet.bet === '1';
                     const favored = isHome ? home : away;
-                    const underdog = isHome ? away : home;
 
                     html += `
                     <div class="match-card">
@@ -214,7 +212,7 @@ def home():
                         </div>
                         <div class="probabilities">
                             <div class="prob-item">
-                                <div class="prob-label">Victoire ${home}</div>
+                                <div class="prob-label">Probabilité estimée</div>
                                 <div class="prob-value">${(bet.estimated_prob * 100).toFixed(1)}%</div>
                             </div>
                             <div class="prob-item">
@@ -223,13 +221,13 @@ def home():
                             </div>
                         </div>
                         <div class="recommendation">
-                            ➤ <strong>${favored}</strong> a plus de chances de gagner (${(bet.estimated_prob * 100).toFixed(1)}%)
+                            ➤ <strong>${favored}</strong> est le meilleur pari (${(bet.estimated_prob * 100).toFixed(1)}%)
                         </div>
                     </div>
                     `;
                 });
 
-                // Ajout du coupon combiné
+                // Coupon combiné
                 const combinedProb = (data.combined_probability * 100).toFixed(1);
                 const expectedReturn = data.expected_return ? `+${(data.expected_return * 100).toFixed(0)}%` : 'N/A';
 
@@ -252,40 +250,54 @@ def home():
     '''
     return render_template_string(html)
 
+
 @app.route('/api/value-bets')
 def api_value_bets():
-    fixtures = get_fixtures_today()
-    value_bets = []
-    for f in fixtures[:10]:  # Limite à 10 matchs
-        odds = get_odds_1xbet(f['home'], f['away'])
-        probs = estimate_win_probability(f['home'], f['away'])
-        
-        if is_value_bet(probs['home'], odds['home']):
-            value_bets.append({
-                'match': f"{f['home']} vs {f['away']}",
-                'bet': '1',
-                'odds': odds['home'],
-                'estimated_prob': probs['home'],
-                'edge': round(probs['home'] - (1/odds['home']), 3)
-            })
-        if is_value_bet(probs['away'], odds['away']):
-            value_bets.append({
-                'match': f"{f['home']} vs {f['away']}",
-                'bet': '2',
-                'odds': odds['away'],
-                'estimated_prob': probs['away'],
-                'edge': round(probs['away'] - (1/odds['away']), 3)
-            })
-    
-    # Génère 1 coupon de 3–4 matchs
-    coupon = value_bets[:4] if len(value_bets) >= 3 else []
-    combined_prob = 1
-    for bet in coupon:
-        combined_prob *= bet['estimated_prob']
-    
-    return jsonify({
-        'value_bets_count': len(value_bets),
-        'coupon': coupon,
-        'combined_probability': round(combined_prob, 3),
-        'expected_return': round(combined_prob * sum(b['odds'] for b in coupon), 2)
-    })
+    try:
+        fixtures = get_fixtures_today()
+        value_bets = []
+
+        for f in fixtures[:10]:  # Limite à 10 matchs
+            odds = get_odds_1xbet(f['home'], f['away'])
+            probs = estimate_win_probability(f['home'], f['away'])
+
+            if odds and 'home' in odds and 'away' in odds:
+                if is_value_bet(probs['home'], odds['home']):
+                    value_bets.append({
+                        'match': f"{f['home']} vs {f['away']}",
+                        'bet': '1',
+                        'odds': odds['home'],
+                        'estimated_prob': probs['home'],
+                        'edge': round(probs['home'] - (1/odds['home']), 3)
+                    })
+                if is_value_bet(probs['away'], odds['away']):
+                    value_bets.append({
+                        'match': f"{f['home']} vs {f['away']}",
+                        'bet': '2',
+                        'odds': odds['away'],
+                        'estimated_prob': probs['away'],
+                        'edge': round(probs['away'] - (1/odds['away']), 3)
+                    })
+
+        # Coupon de 3–4 matchs
+        coupon = value_bets[:4] if len(value_bets) >= 3 else []
+        combined_prob = 1
+        for bet in coupon:
+            combined_prob *= bet['estimated_prob']
+
+        expected_return = None
+        if coupon:
+            combined_odds = 1
+            for b in coupon:
+                combined_odds *= b['odds']
+            expected_return = round(combined_prob * combined_odds, 2)
+
+        return jsonify({
+            'value_bets_count': len(value_bets),
+            'coupon': coupon,
+            'combined_probability': round(combined_prob, 3),
+            'expected_return': expected_return
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)})
